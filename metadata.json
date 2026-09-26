@@ -1,0 +1,6 @@
+{
+  "name": "규인 유튜브 타임코드 메이커",
+  "description": "음원 길이를 자동 계산해 유튜브 설명란용 트랙리스트를 만들어주는 도구",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
