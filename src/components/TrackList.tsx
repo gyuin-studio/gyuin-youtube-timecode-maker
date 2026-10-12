@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { RotateCcw, Plus, Clock, ListMusic } from 'lucide-react';
-import { AudioTrack } from '../types';
+import { RotateCcw, Plus, Clock, ListMusic, Calculator } from 'lucide-react';
+import { TrackWithTiming } from '../types';
 import { TrackItem } from './TrackItem';
 import { formatDurationHuman, formatTimecode } from '../utils/audio';
 
 interface TrackListProps {
-  tracks: (AudioTrack & { startTime: number; timecode: string })[];
+  tracks: TrackWithTiming[];
   totalDuration: number;
+  rawTotalDuration?: number;
   onMoveUp: (index: number) => void;
   onMoveDown: (index: number) => void;
   onUpdateTitle: (id: string, newTitle: string) => void;
@@ -18,6 +19,7 @@ interface TrackListProps {
 export const TrackList: React.FC<TrackListProps> = ({
   tracks,
   totalDuration,
+  rawTotalDuration,
   onMoveUp,
   onMoveDown,
   onUpdateTitle,
@@ -60,11 +62,14 @@ export const TrackList: React.FC<TrackListProps> = ({
 
     const fileUrl = URL.createObjectURL(targetTrack.file);
     audioPlayerRef.current.src = fileUrl;
-    audioPlayerRef.current.play().then(() => {
-      setPlayingTrackId(id);
-    }).catch(() => {
-      setPlayingTrackId(null);
-    });
+    audioPlayerRef.current
+      .play()
+      .then(() => {
+        setPlayingTrackId(id);
+      })
+      .catch(() => {
+        setPlayingTrackId(null);
+      });
   };
 
   const handleAddFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -111,6 +116,11 @@ export const TrackList: React.FC<TrackListProps> = ({
             <span className="text-xs text-[#528A6D] hidden md:inline">
               ({formatDurationHuman(totalDuration)})
             </span>
+            {typeof rawTotalDuration === 'number' && (
+              <span className="text-[11px] font-mono text-[#6A9E83] bg-[#F4FAF6] px-2 py-0.5 rounded border border-[#DCEFE3] hidden lg:inline">
+                실제 합계: {rawTotalDuration.toFixed(2)}초
+              </span>
+            )}
           </div>
         </div>
 
@@ -126,7 +136,7 @@ export const TrackList: React.FC<TrackListProps> = ({
             <span>음원 추가</span>
           </button>
 
-          {/* 새로 시작 버튼 (Feature 14, 15) */}
+          {/* 새로 시작 버튼 */}
           <button
             type="button"
             id="btn-reset-all"
@@ -137,6 +147,28 @@ export const TrackList: React.FC<TrackListProps> = ({
             <span>새로 시작</span>
           </button>
         </div>
+      </div>
+
+      {/* 검산 공식 및 안내문 (Requirements 5 & 6) */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#F0FAF4] border border-[#CCE8D8] shadow-xs mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 mb-2.5 border-b border-[#D8EFE2]">
+          <div className="flex items-center gap-2">
+            <Calculator className="w-4 h-4 text-[#2F6F4E]" />
+            <span className="font-extrabold text-xs sm:text-sm text-[#2F6F4E]">
+              타임코드 정밀 검산 공식
+            </span>
+          </div>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-[#BFE2CE] font-mono font-bold text-xs sm:text-sm text-[#1B4B34] shadow-2xs">
+            <span className="text-[#2F6F4E]">시작 지점</span>
+            <span className="text-[#5B9C7B]">+</span>
+            <span className="text-[#2F6F4E]">표시 구간</span>
+            <span className="text-[#5B9C7B]">=</span>
+            <span className="text-[#1E5236]">다음 시작 지점</span>
+          </div>
+        </div>
+        <p className="text-xs sm:text-[13px] text-[#3E775A] leading-relaxed">
+          실제 오디오 길이는 소수점 초까지 계산되며, 유튜브 타임코드는 정수 초로 표시됩니다. 그래서 표시 구간은 실제 길이와 1초 정도 다를 수 있지만, 시작 지점 기준으로 정확하게 검산됩니다.
+        </p>
       </div>
 
       {/* Guide tooltip for ordering and editing */}
@@ -165,3 +197,4 @@ export const TrackList: React.FC<TrackListProps> = ({
     </div>
   );
 };
+

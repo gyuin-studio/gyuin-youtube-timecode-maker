@@ -19,7 +19,7 @@ export default function App() {
   const [progressText, setProgressText] = useState<string>('');
 
   // Calculate cumulative timings (start time & timecode) and total duration
-  const { tracksWithTimings, totalDuration } = useMemo(() => {
+  const { tracksWithTimings, totalDuration, rawTotalDuration } = useMemo(() => {
     return calculateTrackTimings(tracks);
   }, [tracks]);
 
@@ -196,6 +196,7 @@ export default function App() {
             <TrackList
               tracks={tracksWithTimings}
               totalDuration={totalDuration}
+              rawTotalDuration={rawTotalDuration}
               onMoveUp={handleMoveUp}
               onMoveDown={handleMoveDown}
               onUpdateTitle={handleUpdateTitle}

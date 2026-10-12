@@ -1,4 +1,4 @@
-import { AudioTrack, TimecodeFormatStyle } from '../types';
+import { AudioTrack, TrackWithTiming, TimecodeFormatStyle } from '../types';
 
 /**
  * Remove audio extensions (.mp3, .wav, .m4a, .flac, etc.)
@@ -25,14 +25,6 @@ export function parseFileName(fileName: string): {
   }
 
   // 3. Strip leading number / track prefix from title
-  // e.g. "01. 곡 제목" -> "곡 제목"
-  // "3. Blue Hour, Warm Keys" -> "Blue Hour, Warm Keys"
-  // "01 - 곡 제목" -> "곡 제목"
-  // "01_곡 제목" -> "곡 제목"
-  // "1 곡 제목" -> "곡 제목"
-  // "[01] 곡 제목" -> "곡 제목"
-  // "(01) 곡 제목" -> "곡 제목"
-  // "Track 01 - 곡 제목" -> "곡 제목"
   let cleanTitle = nameWithoutExt
     .replace(/^\s*\[?\s*(?:track\s*|no\.?\s*|#\s*)?\d+\s*\]?\s*[-_.)\]~:—–]*\s*/i, '')
     .trim();
@@ -82,8 +74,8 @@ export function deduplicateString(str: string): string {
 
 /**
  * Reads audio duration using HTMLAudioElement loadedmetadata event.
- * Falls back to Web Audio API decodeAudioData if HTMLAudioElement fails or returns invalid duration.
- * Always returns rounded/floored integer seconds to ensure 100% consistent duration across all calculations.
+ * Preserves exact floating-point duration (소수점 초) without rounding or flooring.
+ * Falls back to Web Audio API decodeAudioData if HTMLAudioElement fails.
  */
 export function readAudioDuration(file: File): Promise<number> {
   return new Promise((resolve) => {
@@ -104,8 +96,11 @@ export function readAudioDuration(file: File): Promise<number> {
       isResolved = true;
       cleanup();
 
-      // Enforce Math.floor integer duration for single source of truth
-      const duration = Math.max(0, Math.floor(rawDuration));
+      // Preserve floating-point seconds (round to 3 decimal places for stability, no integer truncation)
+      const duration =
+        typeof rawDuration === 'number' && !isNaN(rawDuration) && isFinite(rawDuration) && rawDuration > 0
+          ? Math.round(rawDuration * 1000) / 1000
+          : 0;
 
       if (duration > 0) {
         resolve(duration);
@@ -113,7 +108,7 @@ export function readAudioDuration(file: File): Promise<number> {
         URL.revokeObjectURL(objectUrl);
         // Fallback to Web Audio API
         fallbackWebAudio(file).then((fallbackDur) => {
-          resolve(Math.max(0, Math.floor(fallbackDur)));
+          resolve(fallbackDur > 0 ? Math.round(fallbackDur * 1000) / 1000 : 0);
         });
       }
     };
@@ -149,13 +144,15 @@ export function readAudioDuration(file: File): Promise<number> {
 async function fallbackWebAudio(file: File): Promise<number> {
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return 0;
     const ctx = new AudioCtx();
     const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
     const duration = audioBuffer.duration;
     ctx.close();
-    return Math.max(0, Math.floor(duration || 0));
+    return duration && isFinite(duration) ? duration : 0;
   } catch {
     return 0;
   }
@@ -163,9 +160,9 @@ async function fallbackWebAudio(file: File): Promise<number> {
 
 /**
  * Formats seconds into YouTube timecode (MM:SS or HH:MM:SS)
- * Strictly uses Math.floor for all parts.
+ * Strictly formats whole integer seconds.
  * e.g. 0 -> "00:00"
- * 166 -> "02:46"
+ * 165 -> "02:45"
  * 3665 -> "01:01:05"
  */
 export function formatTimecode(seconds: number, forceHours: boolean = false): string {
@@ -184,8 +181,6 @@ export function formatTimecode(seconds: number, forceHours: boolean = false): st
 
 /**
  * Formats duration into user-friendly text like "3분 24초" or "1시간 15분 4초"
- * Strictly uses Math.floor, matching formatTimecode exactly.
- * e.g. 166 -> "2분 46초" (matching "02:46" without 1-second discrepancy)
  */
 export function formatDurationHuman(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -203,42 +198,91 @@ export function formatDurationHuman(seconds: number): string {
 }
 
 /**
- * Compute cumulative start times for each track
+ * Formats exact decimal seconds with up to 2 decimal digits for clear display
+ * e.g. 165.74 -> "165.74초", 120 -> "120.00초"
  */
-export function calculateTrackTimings(tracks: AudioTrack[], forceHours: boolean = false): {
-  tracksWithTimings: (AudioTrack & { startTime: number; timecode: string })[];
+export function formatExactSeconds(sec: number): string {
+  return `${sec.toFixed(2)}초`;
+}
+
+/**
+ * Compute cumulative timings with exact floating-point math:
+ * 1. Maintains continuous float accumulation (rawStartTime, rawEndTime).
+ * 2. Does NOT round, floor, or parseInt during intermediate accumulation.
+ * 3. startSeconds = Math.floor(rawStartTime)
+ * 4. nextStartSeconds = Math.floor(rawEndTime)
+ * 5. displayIntervalSeconds = nextStartSeconds - startSeconds
+ *
+ * This guarantees:
+ * - 시작 지점 + 표시 구간 = 다음 시작 지점 (100% exact integer verification)
+ * - Next track's startSeconds matches previous track's nextStartSeconds exactly.
+ */
+export function calculateTrackTimings(
+  tracks: AudioTrack[],
+  forceHours: boolean = false
+): {
+  tracksWithTimings: TrackWithTiming[];
   totalDuration: number;
+  rawTotalDuration: number;
 } {
   let cumulative = 0;
-  const anyPastHour = tracks.reduce((acc, t) => acc + (t.duration || 0), 0) >= 3600;
+  const rawTotalDuration = tracks.reduce((acc, t) => acc + (t.duration || 0), 0);
+  const totalDuration = Math.floor(rawTotalDuration);
+  const anyPastHour = totalDuration >= 3600;
   const useHours = forceHours || anyPastHour;
 
-  const tracksWithTimings = tracks.map((track) => {
-    const startTime = cumulative;
-    const timecode = formatTimecode(startTime, useHours);
-    cumulative += Math.max(0, track.duration || 0);
+  const tracksWithTimings: TrackWithTiming[] = tracks.map((track, idx) => {
+    const rawStartTime = cumulative;
+    const rawDuration = Math.max(0, track.duration || 0);
+    const rawEndTime = rawStartTime + rawDuration;
+
+    // Convert accumulated boundaries to whole seconds for YouTube timecodes
+    const startSeconds = Math.floor(rawStartTime);
+    const nextStartSeconds = Math.floor(rawEndTime);
+    const displayIntervalSeconds = Math.max(0, nextStartSeconds - startSeconds);
+
+    const timecode = formatTimecode(startSeconds, useHours);
+    const nextTimecode = formatTimecode(nextStartSeconds, useHours);
+    const displayInterval = formatTimecode(displayIntervalSeconds, false);
+    const displayIntervalHuman = formatDurationHuman(displayIntervalSeconds);
+
+    // Continuous floating-point carry-over
+    cumulative = rawEndTime;
+
     return {
       ...track,
-      startTime,
+      startTime: startSeconds,
+      startSeconds,
+      nextStartSeconds,
+      displayIntervalSeconds,
       timecode,
+      nextTimecode,
+      displayInterval,
+      displayIntervalHuman,
+      rawStartTime,
+      rawEndTime,
+      rawDurationSeconds: rawDuration,
+      isLast: idx === tracks.length - 1,
     };
   });
 
   return {
     tracksWithTimings,
-    totalDuration: cumulative,
+    totalDuration,
+    rawTotalDuration,
   };
 }
 
 /**
  * Generate YouTube timecode description text
- * Default format as requested:
+ * Outputs only the timecode and track title (without internal calculation data)
+ * Default format:
  * 00:00 01. 곡 제목
  * 02:04 02. 곡 제목
  * 04:15 03. 곡 제목
  */
 export function generateTracklistOutput(
-  tracks: (AudioTrack & { startTime: number; timecode: string })[],
+  tracks: { title: string; timecode: string }[],
   style: TimecodeFormatStyle = 'numbered'
 ): string {
   return tracks
@@ -276,16 +320,15 @@ export function downloadTextFile(content: string, filename = 'youtube_tracklist.
 }
 
 /**
- * Generates sample demo audio tracks purely in-memory using Web Audio API
- * (Safe, instant, client-only, requires zero internet or server).
+ * Generates sample demo audio tracks with realistic decimal duration values
  */
 export async function createDemoAudioTracks(): Promise<AudioTrack[]> {
   const sampleData = [
-    { title: '봄날의 햇살 (Acoustic Intro)', duration: 124, fileName: '01. 봄날의 햇살 (Acoustic Intro).mp3' },
-    { title: '바람이 머무는 언덕', duration: 131, fileName: '02. 바람이 머무는 언덕.mp3' },
-    { title: '별빛 아래의 산책', duration: 195, fileName: '03. 별빛 아래의 산책.wav' },
-    { title: '기억의 조각들 (Piano Ver.)', duration: 218, fileName: '04. 기억의 조각들 (Piano Ver.).flac' },
-    { title: '내일로 가는 길 (Outro)', duration: 142, fileName: '05. 내일로 가는 길 (Outro).m4a' },
+    { title: '봄날의 햇살 (Acoustic Intro)', duration: 124.62, fileName: '01. 봄날의 햇살 (Acoustic Intro).mp3' },
+    { title: '바람이 머무는 언덕', duration: 131.45, fileName: '02. 바람이 머무는 언덕.mp3' },
+    { title: '별빛 아래의 산책', duration: 195.83, fileName: '03. 별빛 아래의 산책.wav' },
+    { title: '기억의 조각들 (Piano Ver.)', duration: 218.15, fileName: '04. 기억의 조각들 (Piano Ver.).flac' },
+    { title: '내일로 가는 길 (Outro)', duration: 142.38, fileName: '05. 내일로 가는 길 (Outro).m4a' },
   ];
 
   return sampleData.map((item, idx) => ({
@@ -297,3 +340,4 @@ export async function createDemoAudioTracks(): Promise<AudioTrack[]> {
     status: 'ready',
   }));
 }
+

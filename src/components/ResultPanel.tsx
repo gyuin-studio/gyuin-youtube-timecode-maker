@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Copy, Check, FileDown, FileText, Settings2 } from 'lucide-react';
-import { AudioTrack, TimecodeFormatStyle } from '../types';
+import { TrackWithTiming, TimecodeFormatStyle } from '../types';
 import { generateTracklistOutput, downloadTextFile } from '../utils/audio';
 
 interface ResultPanelProps {
-  tracks: (AudioTrack & { startTime: number; timecode: string })[];
+  tracks: TrackWithTiming[];
 }
 
 export const ResultPanel: React.FC<ResultPanelProps> = ({ tracks }) => {

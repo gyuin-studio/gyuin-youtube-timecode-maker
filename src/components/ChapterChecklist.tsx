@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, HelpCircle, Youtube } from 'lucide-react';
-import { AudioTrack } from '../types';
+import { TrackWithTiming } from '../types';
 
 interface ChapterChecklistProps {
-  tracks: (AudioTrack & { startTime: number; timecode: string })[];
+  tracks: TrackWithTiming[];
 }
 
 export const ChapterChecklist: React.FC<ChapterChecklistProps> = ({ tracks }) => {
